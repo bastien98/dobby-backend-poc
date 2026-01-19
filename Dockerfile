@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies (if any)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
