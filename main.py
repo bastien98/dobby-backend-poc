@@ -11,7 +11,6 @@ async def get_success():
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     s3_client = boto3.client('s3')
-    file_id = str(uuid.uuid4())
     key = f"receipts/{file.filename}"
     
     try:
@@ -19,4 +18,4 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
         
-    return {"status": "success", "uuid": file_id, "s3_key": key}
+    return {"status": "success", "s3_key": key}
