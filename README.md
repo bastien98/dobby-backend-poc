@@ -36,5 +36,5 @@ poetry run python -m uvicorn main:app --port 8000 --reload
 
 **Upload Test:**
 ```bash
-curl -F "file=@test.pdf" <APP_RUNNER_URL>/upload
+curl -F "file=@test.pdf" https://3edaeenmik.eu-west-1.awsapprunner.com/upload
 ```
