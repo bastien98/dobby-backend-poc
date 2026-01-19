@@ -53,7 +53,18 @@ def process_receipt_background(file_path: str, receipt_id: uuid.UUID):
 
 @app.post("/upload")
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    s3_client = boto3.client('s3')
+    
+    # Configure S3 Client
+    s3_endpoint = os.getenv("S3_ENDPOINT_URL")
+    s3_bucket = os.getenv("S3_BUCKET_NAME", "dobby-receipts")
+    
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=s3_endpoint,
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+    )
+    
     key = f"receipts/{file.filename}"
     
     # Create DB record first
@@ -71,7 +82,7 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     file.file.seek(0)
     
     try:
-        s3_client.upload_fileobj(file.file, "dobby-poc", key)
+        s3_client.upload_fileobj(file.file, s3_bucket, key)
     except Exception as e:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

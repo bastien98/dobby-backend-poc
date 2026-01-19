@@ -7,8 +7,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Create engine
-# If no DB URL is set, this will fail at runtime, which is expected
-engine = create_engine(DATABASE_URL) if DATABASE_URL else None
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
+# Create engine
+engine = create_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
