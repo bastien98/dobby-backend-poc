@@ -8,6 +8,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Create engine
 if not DATABASE_URL:
+    print("Detected Environment Variables Keys:", list(os.environ.keys()))
     raise ValueError("DATABASE_URL environment variable is not set")
 
 # Create engine
