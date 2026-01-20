@@ -1,7 +1,7 @@
 import os
 import time
 from typing import List, Literal
-import google.generativeai as genai
+from google import genai
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
@@ -27,13 +27,22 @@ class ReceiptExtraction(BaseModel):
 # 2. Helper: Upload PDF to Gemini File API
 def upload_to_gemini(path, mime_type="application/pdf"):
     """
-    Uploads the given file to Gemini.
+    Uploads the given file to Gemini using the new google.genai Client.
     """
-    file = genai.upload_file(path, mime_type=mime_type)
-    # Files are processed asynchronously, wait for it to be ready
+    if not os.getenv("GOOGLE_API_KEY"):
+         raise ValueError("GOOGLE_API_KEY not found in environment variables")
+         
+    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    
+    # upload_file logic for the new SDK
+    # Reference: client.files.upload(path=...)
+    file = client.files.upload(path=path)
+    
+    # Wait for processing
     while file.state.name == "PROCESSING":
         time.sleep(1)
-        file = genai.get_file(file.name)
+        # Refresh file status
+        file = client.files.get(name=file.name)
         
     if file.state.name == "FAILED":
         raise ValueError("File processing failed on Gemini side.")
@@ -46,13 +55,14 @@ def analyze_receipt_visually(pdf_path):
     if not os.getenv("GOOGLE_API_KEY"):
          raise ValueError("GOOGLE_API_KEY not found in environment variables")
          
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-
+    # No global configure needed for the new SDK, we instantiate Client inside helper
+    # But for LangChain, we still pass the API key or reliance on env var.
+    
     # Upload file
     uploaded_file = upload_to_gemini(pdf_path, mime_type="application/pdf")
     
     # Setup LLM with Structured Output
-    # Using gemini-1.5-pro as requested (reliable document processor)
+    # Using gemini-1.5-pro as requested
     llm = ChatGoogleGenerativeAI(
         model="gemini-1.5-pro",
         temperature=0,
