@@ -86,7 +86,8 @@ def analyze_receipt_visually(pdf_path):
             response_schema=ReceiptExtraction
         )
     )
-    
+
+
     # Parse the result
     if not response.parsed:
         raise ValueError("Failed to extract receipt data or parse JSON.")
