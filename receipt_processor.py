@@ -15,12 +15,12 @@ CategoryType = Literal[
 
 class LineItem(BaseModel):
     name: str = Field(..., description="The name of the product purchased.")
-    price: str = Field(..., description="The price of the item (e.g., '2,99').")
+    price: float = Field(..., description="The price of the item (e.g., 2.99).")
     category: CategoryType = Field(..., description="The category of the item.")
 
 class ReceiptExtraction(BaseModel):
     store_name: Literal["ALDI", "COLLRUYT"] = Field(..., description="The store name.")
-    total_paid: str = Field(..., description="The final total amount paid.")
+    total_paid: float = Field(..., description="The final total amount paid.")
     timestamp: str = Field(..., description="The date and time of the purchase (format: YYYY-MM-DD HH:MM). If time is missing, use 00:00.")
     line_items: List[LineItem] = Field(..., description="List of all purchased items.")
 
@@ -61,7 +61,7 @@ def analyze_receipt_visually(pdf_path):
             1. Identify store (ALDI/COLLRUYT).
             2. Extract Total Paid.
             3. Extract the Timestamp (Date & Time).
-            4. List every line item, price, and categorize them strictly using these tags:
+            4. List every line item, price (as a number, e.g. 2.99), and categorize them strictly using these tags:
                - Alcohol, Tobacco, Fresh Produce, Meat & Fish, Dairy & Eggs, Bakery, 
                - Pantry, Ready Meals, Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water), 
                - Household, Personal Care, Pets, Unknown.

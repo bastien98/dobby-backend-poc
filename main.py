@@ -39,7 +39,7 @@ def process_receipt_background(file_path: str, receipt_id: uuid.UUID):
             receipt.total_paid = result.total_paid
             receipt.timestamp = result.timestamp
             # Convert Pydantic models to dicts for JSON storage
-            receipt.line_items = [item.dict() for item in result.line_items]
+            receipt.line_items = [item.model_dump() for item in result.line_items]
             db.commit()
             print(f"Updated receipt {receipt_id} in DB")
             

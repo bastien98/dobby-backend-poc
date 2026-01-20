@@ -1,6 +1,6 @@
 import os
 import uuid
-from sqlalchemy import create_engine, Column, String, UUID, JSON
+from sqlalchemy import create_engine, Column, String, UUID, JSON, Float
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Get DATABASE_URL from environment
@@ -8,7 +8,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Create engine
 if not DATABASE_URL:
-    print("Detected Environment Variables Keys:", list(os.environ.keys()))
     raise ValueError("DATABASE_URL environment variable is not set")
 
 # Create engine
@@ -23,7 +22,7 @@ class Receipt(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     store_name = Column(String, nullable=True)
-    total_paid = Column(String, nullable=True)
+    total_paid = Column(Float, nullable=True)
     timestamp = Column(String, nullable=True)
     # Storing line items as JSON for flexibility
     line_items = Column(JSON, nullable=True) 
