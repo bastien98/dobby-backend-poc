@@ -16,7 +16,8 @@ dependencies = [
     "langchain-google-genai",
     "google-generativeai",
     "sqlalchemy (>=2.0.45,<3.0.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)"
+    "psycopg2-binary (>=2.9.11,<3.0.0)",
+    "fpdf (>=1.7.2,<2.0.0)"
 ]
 
 
