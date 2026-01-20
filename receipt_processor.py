@@ -1,10 +1,10 @@
-import base64
-import io
+import os
+import time
 from typing import List, Literal
-from pdf2image import convert_from_path
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 # 1. Define Categories & Schema (Same as before)
 CategoryType = Literal[
@@ -24,43 +24,75 @@ class ReceiptExtraction(BaseModel):
     timestamp: str = Field(..., description="The date and time of the purchase (format: YYYY-MM-DD HH:MM). If time is missing, use 00:00.")
     line_items: List[LineItem] = Field(..., description="List of all purchased items.")
 
-# 2. Helper: Convert PDF to Base64 Images
-def load_pdf_as_images(pdf_path):
-    # Convert PDF pages to PIL images with high DPI for better OCR quality
-    images = convert_from_path(pdf_path, dpi=300)
-    
-    encoded_images = []
-    for img in images:
-        # Resize if necessary to save tokens/bandwidth (optional)
-        # img.thumbnail((1024, 1024)) 
+# 2. Helper: Upload PDF to Gemini File API
+def upload_to_gemini(path, mime_type="application/pdf"):
+    """
+    Uploads the given file to Gemini.
+    """
+    file = genai.upload_file(path, mime_type=mime_type)
+    # Files are processed asynchronously, wait for it to be ready
+    while file.state.name == "PROCESSING":
+        time.sleep(1)
+        file = genai.get_file(file.name)
         
-        buffered = io.BytesIO()
-        # Use high quality JPEG to preserve text details without the massive size of PNG
-        img.save(buffered, format="JPEG", quality=100, subsampling=0)
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        encoded_images.append(img_str)
+    if file.state.name == "FAILED":
+        raise ValueError("File processing failed on Gemini side.")
         
-    return encoded_images
+    return file
 
-# 3. The Vision Agent Function
-# 3. The Vision Agent Function
+# 3. The Vision/Document Agent Function
 def analyze_receipt_visually(pdf_path):
+    # Ensure GOOGLE_API_KEY is set in environment
+    if not os.getenv("GOOGLE_API_KEY"):
+         raise ValueError("GOOGLE_API_KEY not found in environment variables")
+         
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+    # Upload file
+    uploaded_file = upload_to_gemini(pdf_path, mime_type="application/pdf")
+    
     # Setup LLM with Structured Output
-    # Ensure OPENAI_API_KEY is set in environment
-    # Use gpt-4o for best multimodal performance
-    llm = ChatOpenAI(model="gpt-5", temperature=0)
+    # Using gemini-1.5-pro as requested (reliable document processor)
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-pro",
+        temperature=0,
+        google_api_key=os.getenv("GOOGLE_API_KEY")
+    )
     structured_llm = llm.with_structured_output(ReceiptExtraction)
     
-    # Get images
-    base64_images = load_pdf_as_images(pdf_path)
-    
     # Prepare the message content
-    # We add the text instructions + all receipt images
+    # For Gemini, we pass the file URI as image_url (LangChain abstraction handles this)
+    # or better, just rely on the text prompt if using genai directly, but 
+    # langchain-google-genai < 1.0 didn't support file_uri easily. 
+    # However, newer versions support it. 
+    # Alternative: Use the raw context string. 
+    # Let's try the standard LangChain way for multimodal input which uses image_url but pointing to the file?
+    # Actually, standard LangChain image_url expects base64 or http url. 
+    # Does generic "pdf" work? 
+    # The safest way with the File API and LangChain is often to just use the raw genai client OR 
+    # construct a message that the adapter understands.
+    # 
+    # Let's trust the "image_url" hack often works or simpler: use the raw client if we want File API specifically?
+    # But user asked for langchain-google-genai. 
+    # Let's try passing it as a "media" block if possible, or fall back to standard image_url logic?
+    #
+    # Wait, the best way for langchain-google-genai + File API is passing the file uri string
+    # in a way that maps to a Part.
+    #
+    # Let's stick to the official pattern:
+    # message = HumanMessage(content=[{"type": "text", "text": "..."}, {"type": "media", "file_uri": ..., "mime_type": ...}])
+    # Note: "media" type is specific to some adapters. 
+    # Let's try the "image_url" format with the file uri, as that is commonly mapped.
+    # OR, construct the prompt using `genai` SDK directly if LangChain is too abstract here?
+    # The prompt asked to use the model.
+    #
+    # Let's use the standard "image_url"{"url": file.uri} pattern which is often intercepted.
+    
     content_payload = [
         {
-            "type": "text",
+            "type": "text", 
             "text": """
-            Extract the receipt data from these images with high precision.
+            Extract the receipt data from this document.
             1. Identify store (strictly ALDI or COLLRUYT).
             2. Extract Total Paid.
             3. Extract the Timestamp (Date & Time).
@@ -72,20 +104,22 @@ def analyze_receipt_visually(pdf_path):
                  Household, Personal Care, Pets, Unknown.
             """
         },
-    ]
-    
-    # Append each page image to the payload
-    for img_str in base64_images:
-        content_payload.append({
+        {
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}
-        })
+            "image_url": {"url": uploaded_file.uri}
+        }
+    ]
 
-    # Create the message
     message = HumanMessage(content=content_payload)
     
     # Invoke the chain
-    # Note: We pass the message list directly to the structured LLM
     result = structured_llm.invoke([message])
     
+    # Clean up file? (Optional but good practice)
+    # genai.delete_file(uploaded_file.name)
+    
+    # Verify result isn't empty
+    if not result:
+        raise ValueError("Failed to extract receipt data.")
+        
     return result
