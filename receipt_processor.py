@@ -48,7 +48,7 @@ def analyze_receipt_visually(pdf_path):
     # Setup LLM with Structured Output
     # Ensure OPENAI_API_KEY is set in environment
     # Use gpt-4o for best multimodal performance
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    llm = ChatOpenAI(model="gpt-5", temperature=0)
     structured_llm = llm.with_structured_output(ReceiptExtraction)
     
     # Get images
