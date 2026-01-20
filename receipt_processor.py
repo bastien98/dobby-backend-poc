@@ -2,9 +2,8 @@ import os
 import time
 from typing import List, Literal
 from google import genai
-from langchain_google_genai import ChatGoogleGenerativeAI
+from google.genai import types
 from pydantic import BaseModel, Field
-from langchain_core.messages import HumanMessage
 
 # 1. Define Categories & Schema (Same as before)
 CategoryType = Literal[
@@ -35,8 +34,8 @@ def upload_to_gemini(path, mime_type="application/pdf"):
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     
     # upload_file logic for the new SDK
-    # Reference: client.files.upload(path=...)
-    file = client.files.upload(path=path)
+    # Reference: client.files.upload(file=...)
+    file = client.files.upload(file=path)
     
     # Wait for processing
     while file.state.name == "PROCESSING":
@@ -55,81 +54,41 @@ def analyze_receipt_visually(pdf_path):
     if not os.getenv("GOOGLE_API_KEY"):
          raise ValueError("GOOGLE_API_KEY not found in environment variables")
          
-    # No global configure needed for the new SDK, we instantiate Client inside helper
-    # But for LangChain, we still pass the API key or reliance on env var.
-    
     # Upload file
     uploaded_file = upload_to_gemini(pdf_path, mime_type="application/pdf")
-    
-    # Setup LLM with Structured Output
-    # Using gemini-1.5-pro as requested
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-pro",
-        temperature=0,
-        google_api_key=os.getenv("GOOGLE_API_KEY")
-    )
-    structured_llm = llm.with_structured_output(ReceiptExtraction)
-    
-    # Prepare the message content
-    # For Gemini, we pass the file URI as image_url (LangChain abstraction handles this)
-    # or better, just rely on the text prompt if using genai directly, but 
-    # langchain-google-genai < 1.0 didn't support file_uri easily. 
-    # However, newer versions support it. 
-    # Alternative: Use the raw context string. 
-    # Let's try the standard LangChain way for multimodal input which uses image_url but pointing to the file?
-    # Actually, standard LangChain image_url expects base64 or http url. 
-    # Does generic "pdf" work? 
-    # The safest way with the File API and LangChain is often to just use the raw genai client OR 
-    # construct a message that the adapter understands.
-    # 
-    # Let's trust the "image_url" hack often works or simpler: use the raw client if we want File API specifically?
-    # But user asked for langchain-google-genai. 
-    # Let's try passing it as a "media" block if possible, or fall back to standard image_url logic?
-    #
-    # Wait, the best way for langchain-google-genai + File API is passing the file uri string
-    # in a way that maps to a Part.
-    #
-    # Let's stick to the official pattern:
-    # message = HumanMessage(content=[{"type": "text", "text": "..."}, {"type": "media", "file_uri": ..., "mime_type": ...}])
-    # Note: "media" type is specific to some adapters. 
-    # Let's try the "image_url" format with the file uri, as that is commonly mapped.
-    # OR, construct the prompt using `genai` SDK directly if LangChain is too abstract here?
-    # The prompt asked to use the model.
-    #
-    # Let's use the standard "image_url"{"url": file.uri} pattern which is often intercepted.
-    
-    content_payload = [
-        {
-            "type": "text", 
-            "text": """
-            Extract the receipt data from this document.
-            1. Identify store (strictly ALDI or COLLRUYT).
-            2. Extract Total Paid.
-            3. Extract the Timestamp (Date & Time).
-            4. Extract EVERY single line item visible. Do not summarize or group items. 
-               - For each item, extract the exact price (e.g. 2.99).
-               - Categorize strictly using these tags:
-                 Alcohol, Tobacco, Fresh Produce, Meat & Fish, Dairy & Eggs, Bakery, 
-                 Pantry, Ready Meals, Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water), 
-                 Household, Personal Care, Pets, Unknown.
-            """
-        },
-        {
-            "type": "image_url",
-            "image_url": {"url": uploaded_file.uri}
-        }
-    ]
 
-    message = HumanMessage(content=content_payload)
+    # Setup Client
+    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+
+    # Prepare Prompt
+    prompt = """
+    Extract the receipt data from this document.
+    1. Identify store (strictly ALDI or COLLRUYT).
+    2. Extract Total Paid.
+    3. Extract the Timestamp (Date & Time).
+    4. Extract EVERY single line item visible. Do not summarize or group items. 
+       - For each item, extract the exact price (e.g. 2.99).
+       - Categorize strictly using these tags:
+         Alcohol, Tobacco, Fresh Produce, Meat & Fish, Dairy & Eggs, Bakery, 
+         Pantry, Ready Meals, Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water), 
+         Household, Personal Care, Pets, Unknown.
+    """
+
+    # Generate Content using native SDK
+    # We pass the file object directly (it contains the URI) and the prompt
+    # We use response_schema to enforce the Pydantic model structure
     
-    # Invoke the chain
-    result = structured_llm.invoke([message])
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=[uploaded_file, prompt],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ReceiptExtraction
+        )
+    )
     
-    # Clean up file? (Optional but good practice)
-    # genai.delete_file(uploaded_file.name)
-    
-    # Verify result isn't empty
-    if not result:
-        raise ValueError("Failed to extract receipt data.")
+    # Parse the result
+    if not response.parsed:
+        raise ValueError("Failed to extract receipt data or parse JSON.")
         
-    return result
+    return response.parsed
