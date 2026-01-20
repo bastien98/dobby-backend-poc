@@ -26,8 +26,8 @@ class ReceiptExtraction(BaseModel):
 
 # 2. Helper: Convert PDF to Base64 Images
 def load_pdf_as_images(pdf_path):
-    # Convert PDF pages to PIL images
-    images = convert_from_path(pdf_path)
+    # Convert PDF pages to PIL images with high DPI for better OCR quality
+    images = convert_from_path(pdf_path, dpi=300)
     
     encoded_images = []
     for img in images:
@@ -35,16 +35,19 @@ def load_pdf_as_images(pdf_path):
         # img.thumbnail((1024, 1024)) 
         
         buffered = io.BytesIO()
-        img.save(buffered, format="JPEG")
+        # Use high quality JPEG to preserve text details without the massive size of PNG
+        img.save(buffered, format="JPEG", quality=100, subsampling=0)
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         encoded_images.append(img_str)
         
     return encoded_images
 
 # 3. The Vision Agent Function
+# 3. The Vision Agent Function
 def analyze_receipt_visually(pdf_path):
     # Setup LLM with Structured Output
     # Ensure OPENAI_API_KEY is set in environment
+    # Use gpt-4o for best multimodal performance
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
     structured_llm = llm.with_structured_output(ReceiptExtraction)
     
@@ -55,18 +58,20 @@ def analyze_receipt_visually(pdf_path):
     # We add the text instructions + all receipt images
     content_payload = [
         {
-            "type": "text", 
+            "type": "text",
             "text": """
-            Extract the receipt data from these images.
-            1. Identify store (ALDI/COLLRUYT).
+            Extract the receipt data from these images with high precision.
+            1. Identify store (strictly ALDI or COLLRUYT).
             2. Extract Total Paid.
             3. Extract the Timestamp (Date & Time).
-            4. List every line item, price (as a number, e.g. 2.99), and categorize them strictly using these tags:
-               - Alcohol, Tobacco, Fresh Produce, Meat & Fish, Dairy & Eggs, Bakery, 
-               - Pantry, Ready Meals, Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water), 
-               - Household, Personal Care, Pets, Unknown.
+            4. Extract EVERY single line item visible. Do not summarize or group items. 
+               - For each item, extract the exact price (e.g. 2.99).
+               - Categorize strictly using these tags:
+                 Alcohol, Tobacco, Fresh Produce, Meat & Fish, Dairy & Eggs, Bakery, 
+                 Pantry, Ready Meals, Snacks & Sweets, Drinks (Soft/Soda), Drinks (Water), 
+                 Household, Personal Care, Pets, Unknown.
             """
-        }
+        },
     ]
     
     # Append each page image to the payload
