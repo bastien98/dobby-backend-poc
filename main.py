@@ -2,8 +2,12 @@ import boto3
 import uuid
 import os
 import shutil
+from datetime import datetime
+from collections import defaultdict
+from typing import List
 from tempfile import NamedTemporaryFile
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from receipt_processor import analyze_receipt_visually
 from database import engine, SessionLocal, Base, Receipt
@@ -92,3 +96,74 @@ async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File
     background_tasks.add_task(process_receipt_background, tmp_path, new_receipt.id)
     
     return {"status": "success", "s3_key": key, "receipt_id": str(new_receipt.id)}
+
+class CategoryBreakdown(BaseModel):
+    name: str
+    spent: float
+    percentage: int
+
+class StoreBreakdownResponse(BaseModel):
+    store_name: str
+    period: str
+    total_store_spend: float
+    categories: List[CategoryBreakdown]
+
+@app.get("/store-breakdown", response_model=List[StoreBreakdownResponse])
+async def get_store_breakdown(db: Session = Depends(get_db)):
+    receipts = db.query(Receipt).all()
+    
+    # Nested dictionary: results[store_name][period] = {"total_spend": 0.0, "categories": {cat_name: spent}}
+    breakdown = defaultdict(lambda: defaultdict(lambda: {"total": 0.0, "categories": defaultdict(float)}))
+    
+    for r in receipts:
+        if not r.timestamp or not r.store_name:
+            continue
+            
+        try:
+            # Parse timestamp (expected format: YYYY-MM-DD HH:MM)
+            dt = datetime.strptime(r.timestamp, "%Y-%m-%d %H:%M")
+            period = dt.strftime("%B %Y")
+        except Exception:
+            # Fallback if format is different or unparseable
+            period = "Unknown Period"
+            
+        store = r.store_name
+        
+        # Aggregate data
+        line_items = r.line_items or []
+        for item in line_items:
+            cat = item.get("category", "Unknown")
+            price = item.get("price", 0.0)
+            
+            breakdown[store][period]["total"] += price
+            breakdown[store][period]["categories"][cat] += price
+            
+    # Format into response structure
+    response = []
+    for store_name, periods in breakdown.items():
+        for period, data in periods.items():
+            total_spend = data["total"]
+            if total_spend == 0:
+                continue
+                
+            categories_list = []
+            for cat_name, spent in data["categories"].items():
+                percentage = int(round((spent / total_spend) * 100))
+                categories_list.append(CategoryBreakdown(
+                    name=cat_name,
+                    spent=round(spent, 2),
+                    percentage=percentage
+                ))
+            
+            # Sort categories by spent descending (optional but good for UX)
+            categories_list.sort(key=lambda x: x.spent, reverse=True)
+            
+            response.append(StoreBreakdownResponse(
+                store_name=store_name,
+                period=period,
+                total_store_spend=round(total_spend, 2),
+                categories=categories_list
+            ))
+            
+    # Sort response by period/store (optional)
+    return response
